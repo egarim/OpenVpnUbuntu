@@ -7,6 +7,8 @@ FILES=(
     "https://raw.githubusercontent.com/egarim/OpenVpnUbuntu/main/setup_openvpn_server.sh"
     "https://raw.githubusercontent.com/egarim/OpenVpnUbuntu/main/generate_ovpn.sh"
     "https://raw.githubusercontent.com/egarim/OpenVpnUbuntu/main/copy_to_www.sh"
+    "https://raw.githubusercontent.com/egarim/OpenVpnUbuntu/main/installapache.sh"
+    
 )
 
 # Download and overwrite files
