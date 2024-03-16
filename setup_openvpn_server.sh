@@ -1,72 +1,80 @@
 #!/bin/bash
 
-# Update package index
-sudo apt update
+# Set Easy-RSA and OpenVPN directories
+EASY_RSA_DIR="/etc/openvpn/easy-rsa"
+OVPN_DIR="/etc/openvpn"
 
-# Install OpenVPN and Easy-RSA
-sudo apt install -y openvpn easy-rsa
+# Check if Easy-RSA and OpenVPN directories exist
+if [ ! -d "$EASY_RSA_DIR" ] || [ ! -d "$OVPN_DIR" ]; then
+    echo "Error: Easy-RSA or OpenVPN directory not found. Please make sure OpenVPN is installed and configured."
+    exit 1
+fi
 
-# Create directory for easy-rsa
-sudo mkdir -p /etc/openvpn/easy-rsa
+# Check if client name is provided
+if [ $# -ne 1 ]; then
+    echo "Usage: $0 <client_name>"
+    exit 1
+fi
 
-# Copy easy-rsa files
-sudo cp -r /usr/share/easy-rsa/* /etc/openvpn/easy-rsa/
+# Set client name
+CLIENT_NAME="$1"
 
-# Change to the easy-rsa directory
-cd /etc/openvpn/easy-rsa || exit
+# Set PKI directory
+PKI_DIR="$EASY_RSA_DIR/pki"
 
-# Initialize PKI (Public Key Infrastructure)
-sudo ./easyrsa init-pki
+# Check if PKI directory exists
+if [ ! -d "$PKI_DIR" ]; then
+    echo "Error: PKI directory not found. Please ensure server setup script was executed successfully."
+    exit 1
+fi
 
-# Build CA (Certificate Authority)
-sudo ./easyrsa build-ca nopass
+# Generate client key and certificate
+cd "$EASY_RSA_DIR" || exit
+./easyrsa gen-req "$CLIENT_NAME" nopass
+./easyrsa sign-req client "$CLIENT_NAME"
 
-# Generate server key and certificate
-sudo ./easyrsa gen-req server nopass
-sudo ./easyrsa sign-req server server
+# Determine server's public IP address
+SERVER_IP=$(curl -s ifconfig.me)
 
-# Generate Diffie-Hellman parameters
-sudo ./easyrsa gen-dh
+# Determine OpenVPN port
+OVPN_PORT=$(grep -w "^port" "$OVPN_DIR/server.conf" | awk '{print $2}')
 
-# Generate HMAC signature to strengthen TLS integrity
-openvpn --genkey --secret /etc/openvpn/ta.key
+# Check if certificates and keys exist
+if [ ! -f "$PKI_DIR/ca.crt" ] || [ ! -f "$PKI_DIR/issued/$CLIENT_NAME.crt" ] || [ ! -f "$PKI_DIR/private/$CLIENT_NAME.key" ] || [ ! -f "$OVPN_DIR/ta.key" ] || [ ! -f "$OVPN_DIR/dh.pem" ]; then
+    echo "Error: One or more required files not found. Please ensure server setup script was executed successfully."
+    exit 1
+fi
 
-# Copy generated files to OpenVPN directory
-sudo cp pki/ca.crt pki/private/server.key pki/issued/server.crt /etc/openvpn/
-sudo cp pki/dh.pem /etc/openvpn/
-sudo cp /etc/openvpn/ta.key /etc/openvpn/
+# Create client configuration file
+cat << EOF > "$CLIENT_NAME.ovpn"
+client
+dev tun
+proto udp
+remote $SERVER_IP $OVPN_PORT
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+key-direction 1
+remote-cert-tls server
+cipher AES-256-CBC
+auth SHA256
+verb 3
+<ca>
+$(cat "$PKI_DIR/ca.crt")
+</ca>
+<cert>
+$(sed -ne '/BEGIN CERTIFICATE/,$ p' "$PKI_DIR/issued/$CLIENT_NAME.crt")
+</cert>
+<key>
+$(cat "$PKI_DIR/private/$CLIENT_NAME.key")
+</key>
+<tls-auth>
+$(cat "$OVPN_DIR/ta.key")
+</tls-auth>
+<dh>
+$(cat "$OVPN_DIR/dh.pem")
+</dh>
+EOF
 
-# Copy sample server configuration file
-sudo cp /usr/share/doc/openvpn/examples/sample-config-files/server.conf.gz /etc/openvpn/
-sudo gzip -d /etc/openvpn/server.conf.gz
-
-# Configure server file for maximum security
-sudo sed -i 's|;tls-auth ta.key 0|tls-auth ta.key 0|' /etc/openvpn/server.conf
-sudo sed -i 's|;cipher AES-256-CBC|cipher AES-256-GCM|' /etc/openvpn/server.conf
-sudo sed -i 's|;auth SHA256|auth SHA512|' /etc/openvpn/server.conf
-sudo sed -i 's|;user nobody|user nobody|' /etc/openvpn/server.conf
-sudo sed -i 's|;group nogroup|group nogroup|' /etc/openvpn/server.conf
-sudo sed -i '/^#.*push "redirect-gateway def1 bypass-dhcp"$/s/^#//' /etc/openvpn/server.conf
-sudo sed -i '/^#.*push "dhcp-option DNS 208.67.222.222"$/s/^#//' /etc/openvpn/server.conf
-sudo sed -i '/^#.*push "dhcp-option DNS 208.67.220.220"$/s/^#//' /etc/openvpn/server.conf
-
-# Enable IP forwarding
-sudo sed -i '/^#.*net.ipv4.ip_forward=1$/s/^#//' /etc/sysctl.conf
-sudo sysctl -p
-
-# Start and enable OpenVPN service
-sudo systemctl start openvpn
-sudo systemctl enable openvpn
-
-# Install Apache
-sudo apt install -y apache2
-
-# Enable Apache to start on boot
-sudo systemctl start apache2
-sudo systemctl enable apache2
-
-# Check Apache status
-#sudo systemctl status apache2
-
-# Display OpenVPN status
-#sudo systemctl status openvpn
+echo "Client configuration file $CLIENT_NAME.ovpn and certificates have been generated."
