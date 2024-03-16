@@ -3,8 +3,8 @@
 # Update package index
 sudo apt update
 
-# Install OpenVPN
-sudo apt install -y openvpn
+# Install OpenVPN and Easy-RSA
+sudo apt install -y openvpn easy-rsa
 
 # Create directory for easy-rsa
 sudo mkdir -p /etc/openvpn/easy-rsa
@@ -66,9 +66,7 @@ sudo systemctl start apache2
 sudo systemctl enable apache2
 
 # Check Apache status
-sudo systemctl status apache2
+#sudo systemctl status apache2
 
 # Display OpenVPN status
-sudo systemctl status openvpn
-
-
+#sudo systemctl status openvpn
