@@ -1,80 +1,84 @@
 #!/bin/bash
 
-# Set Easy-RSA and OpenVPN directories
-EASY_RSA_DIR="/etc/openvpn/easy-rsa"
-OVPN_DIR="/etc/openvpn"
+# Update package index
+sudo apt update
 
-# Check if Easy-RSA and OpenVPN directories exist
-if [ ! -d "$EASY_RSA_DIR" ] || [ ! -d "$OVPN_DIR" ]; then
-    echo "Error: Easy-RSA or OpenVPN directory not found. Please make sure OpenVPN is installed and configured."
-    exit 1
-fi
+# Install OpenVPN and Easy-RSA
+sudo apt install -y openvpn easy-rsa
 
-# Check if client name is provided
-if [ $# -ne 1 ]; then
-    echo "Usage: $0 <client_name>"
-    exit 1
-fi
+# Create directory for easy-rsa
+sudo mkdir -p /etc/openvpn/easy-rsa
 
-# Set client name
-CLIENT_NAME="$1"
+# Copy easy-rsa files
+sudo cp -r /usr/share/easy-rsa/* /etc/openvpn/easy-rsa/
 
-# Set PKI directory
-PKI_DIR="$EASY_RSA_DIR/pki"
+# Change to the easy-rsa directory
+cd /etc/openvpn/easy-rsa || exit
 
-# Check if PKI directory exists
-if [ ! -d "$PKI_DIR" ]; then
-    echo "Error: PKI directory not found. Please ensure server setup script was executed successfully."
-    exit 1
-fi
+# Initialize PKI (Public Key Infrastructure)
+sudo ./easyrsa init-pki
+
+# Build CA (Certificate Authority)
+sudo ./easyrsa build-ca nopass
+
+# Generate server key and certificate
+sudo ./easyrsa gen-req server nopass
+sudo ./easyrsa sign-req server server
+
+# Generate Diffie-Hellman parameters
+sudo ./easyrsa gen-dh
+
+# Generate HMAC signature to strengthen TLS integrity
+openvpn --genkey --secret /etc/openvpn/ta.key
+
+# Copy generated files to OpenVPN directory
+sudo cp pki/ca.crt pki/private/server.key pki/issued/server.crt /etc/openvpn/
+sudo cp pki/dh.pem /etc/openvpn/
+sudo cp /etc/openvpn/ta.key /etc/openvpn/
 
 # Generate client key and certificate
-cd "$EASY_RSA_DIR" || exit
-./easyrsa gen-req "$CLIENT_NAME" nopass
-./easyrsa sign-req client "$CLIENT_NAME"
-
-# Determine server's public IP address
-SERVER_IP=$(curl -s ifconfig.me)
-
-# Determine OpenVPN port
-OVPN_PORT=$(grep -w "^port" "$OVPN_DIR/server.conf" | awk '{print $2}')
-
-# Check if certificates and keys exist
-if [ ! -f "$PKI_DIR/ca.crt" ] || [ ! -f "$PKI_DIR/issued/$CLIENT_NAME.crt" ] || [ ! -f "$PKI_DIR/private/$CLIENT_NAME.key" ] || [ ! -f "$OVPN_DIR/ta.key" ] || [ ! -f "$OVPN_DIR/dh.pem" ]; then
-    echo "Error: One or more required files not found. Please ensure server setup script was executed successfully."
-    exit 1
-fi
+sudo ./easyrsa gen-req client1 nopass
+sudo ./easyrsa sign-req client client1
 
 # Create client configuration file
-cat << EOF > "$CLIENT_NAME.ovpn"
+sudo bash -c "cat > /etc/openvpn/client1.ovpn" << EOF
 client
 dev tun
 proto udp
-remote $SERVER_IP $OVPN_PORT
+remote $(curl -s ifconfig.me) 1194
 resolv-retry infinite
 nobind
 persist-key
 persist-tun
-key-direction 1
 remote-cert-tls server
+tls-auth ta.key 1
 cipher AES-256-CBC
 auth SHA256
-verb 3
-<ca>
-$(cat "$PKI_DIR/ca.crt")
-</ca>
-<cert>
-$(sed -ne '/BEGIN CERTIFICATE/,$ p' "$PKI_DIR/issued/$CLIENT_NAME.crt")
-</cert>
+key-direction 1
 <key>
-$(cat "$PKI_DIR/private/$CLIENT_NAME.key")
+$(cat /etc/openvpn/easy-rsa/pki/private/client1.key)
 </key>
+<cert>
+$(cat /etc/openvpn/easy-rsa/pki/issued/client1.crt)
+</cert>
+<ca>
+$(cat /etc/openvpn/ca.crt)
+</ca>
 <tls-auth>
-$(cat "$OVPN_DIR/ta.key")
+$(cat /etc/openvpn/ta.key)
 </tls-auth>
-<dh>
-$(cat "$OVPN_DIR/dh.pem")
-</dh>
 EOF
 
-echo "Client configuration file $CLIENT_NAME.ovpn and certificates have been generated."
+# Enable IP forwarding
+sudo sed -i '/^#.*net.ipv4.ip_forward=1$/s/^#//' /etc/sysctl.conf
+sudo sysctl -p
+
+# Start and enable OpenVPN service
+sudo systemctl start openvpn
+
+
+# Check Apache status
+#sudo systemctl status apache2
+
+# Display OpenVPN status
+#sudo systemctl status openvpn
