@@ -17,6 +17,13 @@ CLIENT_NAME="$1"
 SERVER_IP="$2"
 SERVER_PORT="$3"
 
+# Change directory to Easy-RSA
+cd /etc/openvpn/easy-rsa || exit
+
+# Generate client key and certificate
+./easyrsa gen-req "$CLIENT_NAME" nopass
+./easyrsa sign-req client "$CLIENT_NAME"
+
 # Create client configuration file
 cat << EOF > "$CLIENT_NAME.ovpn"
 client
@@ -49,4 +56,4 @@ $(cat /etc/openvpn/pki/dh.pem)
 </dh>
 EOF
 
-echo "Client configuration file $CLIENT_NAME.ovpn has been generated."
+echo "Client configuration file $CLIENT_NAME.ovpn and certificates have been generated."
