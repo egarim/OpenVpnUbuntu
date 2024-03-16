@@ -1,8 +1,11 @@
 #!/bin/bash
 
+# Set Easy-RSA path
+EASY_RSA_DIR="/etc/openvpn/easy-rsa"
+
 # Check if Easy-RSA exists
-if [ ! -d "/etc/openvpn/easy-rsa" ]; then
-    echo "Easy-RSA is not installed. Please run the server setup script first."
+if [ ! -d "$EASY_RSA_DIR" ]; then
+    echo "Easy-RSA is not installed in $EASY_RSA_DIR. Please specify the correct directory."
     exit 1
 fi
 
@@ -18,11 +21,14 @@ SERVER_IP="$2"
 SERVER_PORT="$3"
 
 # Change directory to Easy-RSA
-cd /etc/openvpn/easy-rsa || exit
+cd "$EASY_RSA_DIR" || exit
 
 # Generate client key and certificate
 ./easyrsa gen-req "$CLIENT_NAME" nopass
 ./easyrsa sign-req client "$CLIENT_NAME"
+
+# Set OpenVPN PKI directory
+OVPN_PKI_DIR="/etc/openvpn/pki"
 
 # Create client configuration file
 cat << EOF > "$CLIENT_NAME.ovpn"
@@ -40,19 +46,19 @@ cipher AES-256-CBC
 auth SHA256
 verb 3
 <ca>
-$(cat /etc/openvpn/pki/ca.crt)
+$(cat "$OVPN_PKI_DIR/ca.crt")
 </ca>
 <cert>
-$(sed -ne '/BEGIN CERTIFICATE/,$ p' /etc/openvpn/pki/issued/$CLIENT_NAME.crt)
+$(sed -ne '/BEGIN CERTIFICATE/,$ p' "$OVPN_PKI_DIR/issued/$CLIENT_NAME.crt")
 </cert>
 <key>
-$(cat /etc/openvpn/pki/private/$CLIENT_NAME.key)
+$(cat "$OVPN_PKI_DIR/private/$CLIENT_NAME.key")
 </key>
 <tls-auth>
-$(cat /etc/openvpn/ta.key)
+$(cat "$OVPN_PKI_DIR/ta.key")
 </tls-auth>
 <dh>
-$(cat /etc/openvpn/pki/dh.pem)
+$(cat "$OVPN_PKI_DIR/dh.pem")
 </dh>
 EOF
 
